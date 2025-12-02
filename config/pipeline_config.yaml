@@ -1,0 +1,401 @@
+# Pipeline Configuration
+# Healthcare Readmission ETL Pipeline
+# Location: config/pipeline_config.yaml
+
+# ===================================================================
+# GENERAL PIPELINE SETTINGS
+# ===================================================================
+pipeline:
+  name: "UnityPoint Readmission Analytics Pipeline"
+  environment: "production"  # Options: development, staging, production
+  version: "1.0.0"
+  description: "Process patient encounters and enable readmission analytics"
+  owner: "Data Engineering Team"
+  created_date: "2024-12-02"
+
+# ===================================================================
+# DATA SOURCE CONFIGURATION
+# ===================================================================
+sources:
+  gcs_bucket: "gs://unitypoint-hospital-data"
+  
+  encounters:
+    path: "gs://unitypoint-hospital-data/encounters"
+    format: "json"
+    frequency: "daily"
+    schedule: "0 2 * * *"  # 2 AM UTC daily
+    expected_volume: 10000  # records per day
+    schema:
+      - patient_mrn: string
+      - encounter_id: string
+      - admission_date: date
+      - discharge_date: date
+      - diagnosis: string
+      - hospital: string
+      - primary_provider: string
+
+  lab_results:
+    path: "gs://unitypoint-hospital-data/labs"
+    format: "json"
+    frequency: "daily"
+    schedule: "0 2 * * *"
+    expected_volume: 50000  # records per day
+    schema:
+      - lab_id: string
+      - encounter_id: string
+      - test_name: string
+      - result_value: double
+      - reference_range: string
+      - test_date: date
+
+# ===================================================================
+# DATA LAYER CONFIGURATION
+# ===================================================================
+layers:
+  bronze:
+    path: "/mnt/data/bronze"
+    table_name: "bronze.encounters"
+    format: "delta"
+    mode: "merge"  # Options: overwrite, append, merge
+    merge_key: "encounter_id"
+    partitioned_by:
+      - "year"
+      - "month"
+      - "day"
+    retention_days: 90
+    description: "Raw ingest layer - audit columns added, minimal transformation"
+
+  silver:
+    path: "/mnt/data/silver"
+    table_name: "silver.encounters"
+    format: "delta"
+    mode: "overwrite"
+    partitioned_by:
+      - "admission_date"
+    schema_enforcement: true
+    data_quality_enabled: true
+    quarantine_enabled: true
+    quarantine_path: "/mnt/data/quarantine"
+    retention_days: 365
+    description: "Cleaned and validated layer - data quality checks, feature engineering"
+
+  gold:
+    patient_metrics:
+      path: "/mnt/data/gold/readmission_metrics"
+      table_name: "gold.readmission_metrics"
+      format: "delta"
+      mode: "overwrite"
+      partitioned_by:
+        - "metric_date"
+      optimization_enabled: true
+      z_order_by:
+        - "patient_mrn"
+        - "metric_date"
+      retention_days: 730  # Keep 2 years
+      description: "Patient-level readmission metrics"
+
+    hospital_metrics:
+      path: "/mnt/data/gold/hospital_metrics"
+      table_name: "gold.hospital_metrics"
+      format: "delta"
+      mode: "overwrite"
+      partitioned_by:
+        - "metric_date"
+      optimization_enabled: true
+      z_order_by:
+        - "hospital"
+        - "metric_date"
+      description: "Hospital-level performance metrics"
+
+# ===================================================================
+# DATA QUALITY CONFIGURATION
+# ===================================================================
+data_quality:
+  enabled: true
+  
+  validation_rules:
+    encounters:
+      - rule_id: "null_check_mrn"
+        column: "patient_mrn"
+        type: "not_null"
+        fail_action: "quarantine"
+        
+      - rule_id: "null_check_encounter_id"
+        column: "encounter_id"
+        type: "not_null"
+        fail_action: "quarantine"
+        
+      - rule_id: "date_logic"
+        columns: ["admission_date", "discharge_date"]
+        type: "custom"
+        condition: "discharge_date >= admission_date"
+        fail_action: "quarantine"
+        
+      - rule_id: "los_range"
+        column: "length_of_stay"
+        type: "range"
+        min: 0
+        max: 365
+        fail_action: "flag"
+        
+      - rule_id: "duplicate_check"
+        column: "encounter_id"
+        type: "uniqueness"
+        fail_action: "deduplicate"
+
+  quality_metrics:
+    - metric: "null_rate"
+      threshold: 0.01  # 1% acceptable null rate
+      alert_level: "warning"
+      
+    - metric: "duplicate_rate"
+      threshold: 0.001  # 0.1% acceptable
+      alert_level: "error"
+      
+    - metric: "validation_pass_rate"
+      threshold: 0.96  # 96% must pass validation
+      alert_level: "error"
+
+# ===================================================================
+# PERFORMANCE & OPTIMIZATION CONFIGURATION
+# ===================================================================
+optimization:
+  enabled: true
+  
+  compaction:
+    enabled: true
+    target_file_size_mb: 128
+    schedule: "0 6 * * *"  # 6 AM UTC daily
+    
+  z_ordering:
+    enabled: true
+    tables:
+      - table: "silver.encounters"
+        columns:
+          - "patient_mrn"
+          - "admission_date"
+      - table: "gold.readmission_metrics"
+        columns:
+          - "patient_mrn"
+          - "metric_date"
+
+  vacuum:
+    enabled: true
+    retention_hours: 168  # 7 days
+    schedule: "0 8 * * *"  # 8 AM UTC daily
+
+  statistics:
+    enabled: true
+    schedule: "0 7 * * *"  # 7 AM UTC daily
+
+# ===================================================================
+# GOVERNANCE & COMPLIANCE CONFIGURATION
+# ===================================================================
+governance:
+  unity_catalog_enabled: true
+  
+  pii_columns:
+    - table: "silver.encounters"
+      columns:
+        - "patient_mrn"
+        - "primary_provider"
+      classification: "PHI"  # Protected Health Information
+      
+  access_control:
+    - role: "data_engineers"
+      permission: "MODIFY"
+      tables: ["bronze.*", "silver.*"]
+      
+    - role: "analysts"
+      permission: "SELECT"
+      tables: ["gold.*"]
+      
+    - role: "clinical_team"
+      permission: "SELECT"
+      tables: ["gold.readmission_metrics"]
+
+# ===================================================================
+# MONITORING & ALERTING CONFIGURATION
+# ===================================================================
+monitoring:
+  enabled: true
+  
+  logging:
+    level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+    destination: "gs://unitypoint-logs"
+    
+  metrics:
+    - pipeline_duration_seconds
+    - data_volume_records
+    - quality_metrics
+    - error_count
+
+  alerts:
+    - condition: "pipeline_duration > 300"  # > 5 minutes
+      severity: "warning"
+      notification: "email"
+      recipients: ["data-eng@unitypoint.org"]
+      
+    - condition: "quality_validation_pass_rate < 0.96"
+      severity: "error"
+      notification: "pagerduty"
+      
+    - condition: "data_volume < expected * 0.8"
+      severity: "warning"
+      notification: "slack"
+
+# ===================================================================
+# SCHEDULE & SLA CONFIGURATION
+# ===================================================================
+scheduling:
+  orchestration: "Databricks Jobs"
+  
+  jobs:
+    - job_id: "bronze_ingestion"
+      notebook: "/Workspace/notebooks/01_bronze_ingestion.py"
+      cluster: "production_cluster"
+      schedule: "0 2 * * *"  # 2 AM UTC
+      max_concurrent_runs: 1
+      timeout_minutes: 30
+      
+    - job_id: "silver_transformation"
+      notebook: "/Workspace/notebooks/02_silver_transformation.py"
+      cluster: "production_cluster"
+      schedule: "0 3 * * *"  # 3 AM UTC (depends on bronze)
+      max_concurrent_runs: 1
+      timeout_minutes: 45
+      depends_on: "bronze_ingestion"
+      
+    - job_id: "gold_aggregation"
+      notebook: "/Workspace/notebooks/03_gold_aggregation.py"
+      cluster: "production_cluster"
+      schedule: "0 4 * * *"  # 4 AM UTC (depends on silver)
+      max_concurrent_runs: 1
+      timeout_minutes: 30
+      depends_on: "silver_transformation"
+      
+    - job_id: "optimization"
+      notebook: "/Workspace/notebooks/04_optimization.py"
+      cluster: "production_cluster"
+      schedule: "0 5 * * *"  # 5 AM UTC
+      max_concurrent_runs: 1
+      timeout_minutes: 60
+
+  sla:
+    bronze_layer:
+      latency_sla_minutes: 30
+      availability_sla_pct: 99.5
+      data_freshness: "daily"
+      
+    silver_layer:
+      latency_sla_minutes: 60
+      availability_sla_pct: 99.5
+      data_freshness: "daily"
+      
+    gold_layer:
+      latency_sla_minutes: 90
+      availability_sla_pct: 99.9
+      data_freshness: "daily"
+
+# ===================================================================
+# RESOURCE CONFIGURATION
+# ===================================================================
+resources:
+  cluster:
+    name: "production_cluster"
+    spark_version: "13.3.x-scala2.12"
+    node_type_id: "i3.xlarge"
+    min_workers: 2
+    max_workers: 10
+    autoscale: true
+    
+  storage:
+    mount_point: "/mnt/data"
+    gcs_bucket: "gs://unitypoint-hospital-data"
+    
+  compute_budget:
+    monthly_limit_usd: 5000
+    alert_threshold_usd: 4500
+
+# ===================================================================
+# ENVIRONMENT-SPECIFIC OVERRIDES
+# ===================================================================
+environments:
+  development:
+    sources:
+      gcs_bucket: "gs://unitypoint-dev-data"
+    resources:
+      cluster:
+        min_workers: 1
+        max_workers: 3
+    monitoring:
+      alerts: []  # Disable alerts in dev
+
+  staging:
+    sources:
+      gcs_bucket: "gs://unitypoint-staging-data"
+    resources:
+      cluster:
+        min_workers: 2
+        max_workers: 5
+
+  production:
+    sources:
+      gcs_bucket: "gs://unitypoint-hospital-data"
+    resources:
+      cluster:
+        min_workers: 2
+        max_workers: 10
+
+# ===================================================================
+# FEATURE FLAGS
+# ===================================================================
+features:
+  scd_type_2_enabled: true
+  data_quality_quarantine: true
+  z_ordering_optimization: true
+  unity_catalog_tagging: true
+  incremental_processing: true
+  performance_monitoring: true
+
+# ===================================================================
+# ROLLBACK & RECOVERY CONFIGURATION
+# ===================================================================
+rollback:
+  enabled: true
+  max_rollback_hours: 48
+  min_version_retention: 5
+  
+# ===================================================================
+# NOTES FOR OPERATORS
+# ===================================================================
+notes: |
+  Configuration for Hospital Readmission Analytics Pipeline
+  
+  1. BEFORE RUNNING IN PRODUCTION:
+     - Update GCS bucket names with actual paths
+     - Configure cluster security groups
+     - Set up service account credentials
+     - Configure monitoring endpoints
+  
+  2. TYPICAL EXECUTION TIME:
+     - Bronze ingestion: ~2 minutes
+     - Silver transformation: ~3 minutes
+     - Gold aggregation: ~2 minutes
+     - Optimization: ~5 minutes
+     - Total: ~15 minutes
+  
+  3. DATA VOLUMES (daily):
+     - Encounters: 10,000 records
+     - Lab results: 50,000 records
+     - Processing: ~100MB
+  
+  4. EXPECTED METRICS:
+     - 30-day readmission rate: 20-25%
+     - Data quality pass rate: 96%+
+     - Query latency: <30 seconds
+  
+  5. FOR TROUBLESHOOTING:
+     - Check logs: /mnt/data/logs/
+     - Run data quality checks: sql/data_quality_checks.sql
+     - Monitor Databricks workspace: https://databricks.com/
