@@ -221,30 +221,6 @@ print(f"Bronze records: {df_bronze.count()}")
 
 ---
 
-## 📚 Key Concepts for Interviews
-
-**Why Delta Lake MERGE?**
-- Handles both inserts and updates atomically
-- Supports late-arriving data gracefully
-- Eliminates duplicate processing
-
-**Data Quality Philosophy**
-- Quarantine bad records instead of failing
-- Pipeline resilience > data perfection
-- Measure quality at each layer
-
-**Performance: Z-Ordering**
-- Orders data by filter columns within files
-- Enables partition elimination during scans
-- Most effective with 1-2 filter columns
-
-**SCD Type 2 Use Case**
-- Patients change insurance, primary care providers
-- Need to answer: "What was their status in Q2 2023?"
-- Surrogate key + effective dates enable historical queries
-
----
-
 ## 💡 Production Considerations
 
 Not included (out of scope for demo):
