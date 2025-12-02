@@ -54,7 +54,7 @@ CURRENT_TIMESTAMP = current_timestamp()
 
 def load_encounters_raw(source_path: str) -> 'DataFrame':
     """
-    Reads raw encounter JSON files from GCS.
+    Reads raw encounter CSV files from local storage.
     
     Expected schema:
     - patient_mrn: string
@@ -66,7 +66,7 @@ def load_encounters_raw(source_path: str) -> 'DataFrame':
     - primary_provider: string
     """
     try:
-        df_raw = spark.read.format("json").option("inferSchema", "true").load(source_path)
+        df_raw = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(source_path)
         
         print(f"✅ Successfully loaded {df_raw.count()} raw encounter records")
         print(f"   Schema: {df_raw.schema}")

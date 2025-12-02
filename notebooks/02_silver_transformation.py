@@ -50,6 +50,7 @@ spark = SparkSession.builder.appName("silver_transformation").getOrCreate()
 
 # Configuration
 BRONZE_ENCOUNTERS_PATH = "/mnt/data/bronze/encounters"
+BRONZE_LABS_PATH = "/mnt/data/bronze/lab_results"
 SILVER_ENCOUNTERS_PATH = "/mnt/data/silver/encounters"
 SILVER_PATIENTS_PATH = "/mnt/data/silver/patients"
 QUARANTINE_PATH = "/mnt/data/quarantine/encounters"
@@ -193,7 +194,7 @@ def implement_scd_type_2(df_new, target_path: str) -> None:
     df_new_scd.createOrReplaceTempView("new_patients")
     
     try:
-        # If table exists, mark old records as historical
+        # If table exists, mark old records as historical and insert new current record
         spark.sql(f"""
             MERGE INTO delta.`{target_path}` target
             USING new_patients source
@@ -205,6 +206,24 @@ def implement_scd_type_2(df_new, target_path: str) -> None:
                 end_date = source.effective_date
             WHEN NOT MATCHED 
             THEN INSERT *
+        """)
+        
+        # Insert new current record for changed patients
+        spark.sql(f"""
+            INSERT INTO delta.`{target_path}`
+            SELECT 
+                source.patient_mrn,
+                source.hospital,
+                source.effective_date,
+                CAST(NULL AS DATE) as end_date,
+                True as is_current
+            FROM new_patients source
+            WHERE NOT EXISTS (
+                SELECT 1 FROM delta.`{target_path}` t 
+                WHERE t.patient_mrn = source.patient_mrn 
+                AND t.hospital = source.hospital
+                AND t.is_current = True
+            )
         """)
         
         print(f"✅ SCD Type 2 merge completed for patient dimension")
@@ -274,17 +293,31 @@ def transform_silver_encounters() -> None:
     quarantine_count_2 = write_quarantine(df_quarantine_dates, "invalid_date_logic")
     
     # Step 5: Feature engineering
-    print("\n[5/7] Performing feature engineering...")
+    print("\n[5/8] Performing feature engineering...")
     df_features = feature_engineering(df_valid)
     print(f"✅ Added features: length_of_stay, is_weekend_admission, los_category")
     
-    # Step 6: Add data quality metadata
-    print("\n[6/7] Adding data quality metadata...")
+    # Step 6: Join with lab results (enrich encounters with lab data)
+    print("\n[6/8] Enriching encounters with lab data...")
+    try:
+        df_labs = spark.read.format("delta").load(BRONZE_LABS_PATH)
+        # Count abnormal labs per encounter (simple enrichment)
+        df_labs_agg = df_labs.groupBy("encounter_id").agg(
+            count(col("lab_id")).alias("lab_count")
+        )
+        df_features = df_features.join(df_labs_agg, on="encounter_id", how="left") \
+            .fillna(0, subset=["lab_count"])
+        print(f"✅ Joined lab data: added lab_count column")
+    except Exception as e:
+        print(f"⚠️  Lab data not available yet: {str(e)}. Continuing without labs.")
+    
+    # Step 7: Add data quality metadata
+    print("\n[7/8] Adding data quality metadata...")
     df_silver = df_features.withColumn("data_quality_flag", lit("clean")) \
                             .withColumn("silver_processing_timestamp", CURRENT_TIMESTAMP)
     
-    # Step 7: Write to Silver layer
-    print("\n[7/7] Writing to Silver layer...")
+    # Step 8: Write to Silver layer
+    print("\n[8/8] Writing to Silver layer...")
     df_silver.write \
         .format("delta") \
         .mode("overwrite") \

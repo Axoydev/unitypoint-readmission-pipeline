@@ -37,6 +37,7 @@ from pyspark.sql.functions import (
     current_timestamp,
     datediff,
     lag,
+    lead,
     round as spark_round
 )
 from pyspark.sql.types import IntegerType, DoubleType
@@ -65,12 +66,12 @@ def identify_readmissions(df):
     - Flag if readmission occurred within 30/90 days
     """
     
-    # Window to look at next encounter for each patient
+    # Window to look at NEXT encounter for each patient
     window_spec = Window.partitionBy("patient_mrn").orderBy("admission_date")
     
     df_with_next = df.withColumn(
         "next_admission_date",
-        lag(col("admission_date")).over(window_spec)
+        lead(col("admission_date")).over(window_spec)  # Fixed: lead() instead of lag()
     ).withColumn(
         "days_to_next_admission",
         datediff(col("next_admission_date"), col("discharge_date"))
@@ -101,19 +102,26 @@ def calculate_risk_score(df):
     """
     Calculates simple rule-based risk score (0-100).
     
-    Risk factors:
+    Risk factors (NOTE: We use PREDICTIVE features, not the outcome):
     - Length of stay > 7 days: +20 points
+    - High-risk diagnoses: +25 points
     - Age > 65: +15 points (use date_of_birth if available)
-    - Multiple readmissions in past 6 months: +30 points
-    - Specific high-risk diagnoses: +25 points
     
     Production systems use ML models, but this demonstrates the concept.
+    IMPORTANT: We deliberately do NOT use readmitted_30d in risk calculation
+    because that's the outcome we're trying to predict, not a predictor.
     """
+    
+    # High-risk diagnoses that predict readmission
+    high_risk_diagnoses = [
+        "Sepsis", "Acute kidney injury", "Stroke", 
+        "Myocardial infarction", "Acute coronary syndrome"
+    ]
     
     df_risk = df.withColumn(
         "base_risk_score",
         when(col("length_of_stay") > 7, 20).otherwise(0) +
-        when(col("readmitted_30d") == 1, 25).otherwise(0)
+        when(col("diagnosis").isin(high_risk_diagnoses), 25).otherwise(0)
     ).withColumn(
         "risk_category",
         when(col("base_risk_score") >= 40, "high")
