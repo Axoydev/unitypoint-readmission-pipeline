@@ -213,7 +213,7 @@ def write_bronze_labs() -> None:
     print("=" * 60)
     
     print("\n[1/3] Loading raw lab data...")
-    df_raw = spark.read.format("json").option("inferSchema", "true").load(f"{SOURCE_DATA_PATH}/labs")
+    df_raw = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(f"{SOURCE_DATA_PATH}/labs.csv")
     print(f"✅ Loaded {df_raw.count()} raw lab records")
     
     print("\n[2/3] Adding audit columns...")

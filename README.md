@@ -125,9 +125,18 @@ DATA SOURCES (GCS)
    databricks workspace import-dir notebooks/ /Users/your_email/readmission-pipeline
    ```
 
-4. **Upload sample data**
-   - Copy CSV files from `data/` to DBFS
-   - Update paths in `config/pipeline_config.yaml` if needed
+4. **Upload sample data to Databricks**
+   ```bash
+   # Mount sample data to DBFS
+   # In Databricks notebook, create directory and upload:
+   dbutils.fs.mkdirs("/mnt/gcs/hospital-data")
+   
+   # Then upload CSV files from data/ folder via Databricks UI or dbfs:
+   dbutils.fs.cp("file:///Workspace/data/encounters.csv", "dbfs:/mnt/gcs/hospital-data/encounters.csv")
+   dbutils.fs.cp("file:///Workspace/data/labs.csv", "dbfs:/mnt/gcs/hospital-data/labs.csv")
+   ```
+   
+   Alternatively, update `SOURCE_DATA_PATH` in notebooks to point to your data location.
 
 5. **Run notebooks in order**
    ```
