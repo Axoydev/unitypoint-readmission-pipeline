@@ -319,9 +319,9 @@ This project demonstrates production-ready practices:
 
 ## 📞 Contact & Questions
 
-- **LinkedIn**: [Your LinkedIn Profile]
-- **Email**: [Your Email]
-- **GitHub**: [Your GitHub Profile]
+- **LinkedIn**: https://www.linkedin.com/in/ajay-b-7040b322b/
+- **Email**: Ajaybadugu1999@gmail.com
+- **GitHub**: https://github.com/Axoydev
 
 ---
 
