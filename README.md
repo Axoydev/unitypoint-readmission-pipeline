@@ -1,8 +1,15 @@
 # Hospital Readmission Analytics Pipeline
 
-Production-ready ETL pipeline processing 10K+ daily patient encounters using Databricks and Delta Lake. Reduced data latency from 24 hours to 15 minutes.
+**Portfolio Project** demonstrating production Delta Lake patterns I used at UnityPoint Health, where I processed 3.2TB of HL7/FHIR clinical data. Cannot share actual healthcare code due to HIPAA, so this repo shows the core technical concepts with synthetic data.
 
-**Tech Stack**: PySpark • Delta Lake • Databricks • GCS • Unity Catalog
+**What This Demonstrates:**
+- Medallion architecture (Bronze → Silver → Gold)
+- Delta Lake operations (MERGE, OPTIMIZE, Z-ORDER, SCD Type 2)
+- Data quality patterns (validation, quarantine, metrics)
+- PySpark transformation logic
+- Production-grade code structure and documentation
+
+**Scale Context:** Production system at UnityPoint processed millions of daily encounters across 3.2TB. This demo uses 500 synthetic records to showcase the patterns.
 
 ---
 
@@ -146,6 +153,22 @@ DATA SOURCES (GCS)
    04_optimization.py           → 5 min
    Total: ~15 minutes
    ```
+
+---
+
+## 🏭 Production vs Portfolio Comparison
+
+| Aspect | UnityPoint Production | This Portfolio Demo |
+|--------|----------------------|---------------------|
+| **Volume** | 3.2TB, millions of encounters | 500 synthetic records |
+| **Ingestion** | Streaming HL7/FHIR via Azure Event Hubs | Batch CSV upload |
+| **Latency** | 15-minute streaming micro-batches | Manual batch execution |
+| **Compliance** | HIPAA PHI masking, row-level security | No sensitive data |
+| **Testing** | pytest suite, 85% coverage | Demonstration only |
+| **Monitoring** | Real-time alerts, SLA dashboards | Manual validation |
+| **Orchestration** | Airflow DAGs, dependency management | Sequential notebook runs |
+
+**Purpose**: This repo demonstrates the **core technical patterns** from production work that cannot be publicly shared.
 
 ---
 
